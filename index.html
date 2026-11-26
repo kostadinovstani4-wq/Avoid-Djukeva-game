@@ -34,7 +34,7 @@
       font-size: 14px;
       font-weight: bold;
       color: #fff;
-      background: rgba(0, 0, 0, 0.55);
+      background: rgba(0, 0, 0, 0.6);
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 8px;
       cursor: pointer;
@@ -52,9 +52,10 @@
     const pauseBtn = document.getElementById("pauseBtn");
 
     const FPS = 60;
-    const BASE_PLAYER_WIDTH = 200;
-    const MAX_PLAYER_WIDTH = 320;
-    const MEGA_PLAYER_GROW = 24;
+    const BASE_PLAYER_WIDTH = 120;
+    const MAX_PLAYER_WIDTH = 200;
+    const MIN_PLAYER_WIDTH = 65;
+    const MEGA_PLAYER_GROW = 16;
     const TEN_SECONDS_TICKS = 625;
     const FIVE_SECONDS_TICKS = 313;
     const SEVEN_SECONDS_TICKS = 438;
@@ -67,19 +68,19 @@
       x: Math.max(0, (viewW - BASE_PLAYER_WIDTH) / 2),
       y: viewH - 95,
       width: BASE_PLAYER_WIDTH,
-      height: 30,
+      height: 28,
       color: "#00bfff"
     };
 
-    const star = { x: 200, y: 0, width: 72, height: 72 };
-    const bomb = { x: 100, y: -150, width: 72, height: 72 };
-    const bonus = { x: 300, y: -450, width: 72, height: 72 };
+    const star = { x: 200, y: 0, width: 68, height: 68 };
+    const bomb = { x: 100, y: -150, width: 68, height: 68 };
+    const bonus = { x: 300, y: -450, width: 68, height: 68 };
 
     const rareItem = {
       x: 240,
       y: -120,
-      width: 56,
-      height: 56,
+      width: 54,
+      height: 54,
       active: false,
       speed: 7,
       points: 2,
@@ -89,8 +90,8 @@
     const freezeItem = {
       x: 180,
       y: -120,
-      width: 56,
-      height: 56,
+      width: 54,
+      height: 54,
       active: false,
       speed: 6,
       points: 2,
@@ -100,8 +101,8 @@
     const megaItem = {
       x: 320,
       y: -120,
-      width: 60,
-      height: 60,
+      width: 58,
+      height: 58,
       active: false,
       speed: 8,
       points: 5,
@@ -487,7 +488,7 @@
       if (pointerActive && targetPlayerX !== null) {
         const desiredX = targetPlayerX - player.width / 2;
         const diff = desiredX - player.x;
-        const maxStep = Math.max(18, moveSpeed * 2.2);
+        const maxStep = Math.max(22, moveSpeed * 2.5);
         if (Math.abs(diff) <= maxStep) {
           player.x = desiredX;
         } else {
@@ -519,8 +520,8 @@
         if (score % 5 === 0) {
           starSpeed++;
           bombSpeed++;
-          if (player.width > 90) {
-            player.width -= 8;
+          if (player.width > MIN_PLAYER_WIDTH) {
+            player.width = Math.max(MIN_PLAYER_WIDTH, player.width - 6);
           }
         }
         resetStar();
@@ -696,24 +697,24 @@
         hudText += ` | Бавно: ${slowLeft}s`;
       }
 
-      ctx.font = 'bold 15px "Segoe UI", sans-serif';
-      const w = Math.min(viewW - 110, ctx.measureText(hudText).width + 24);
+      ctx.font = 'bold 14px "Segoe UI", sans-serif';
+      const w = Math.min(viewW - 105, ctx.measureText(hudText).width + 20);
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(12, 12, Math.max(120, w), 32);
 
       ctx.fillStyle = "#ffffff";
-      ctx.fillText(hudText, 20, 33, Math.max(100, w - 16));
+      ctx.fillText(hudText, 18, 33, Math.max(100, w - 12));
     }
 
     function drawCenteredBanner(text, color, fontSize) {
       ctx.font = `bold ${fontSize}px "Segoe UI", sans-serif`;
       const metrics = ctx.measureText(text);
-      const boxW = Math.min(viewW - 24, metrics.width + 32);
+      const boxW = Math.min(viewW - 24, metrics.width + 28);
       const boxH = fontSize + 18;
       const xPos = (viewW - boxW) / 2;
       const yPos = viewH / 2 - 40;
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.78)";
       ctx.fillRect(xPos, yPos, boxW, boxH);
 
       ctx.strokeStyle = color;
@@ -723,7 +724,7 @@
       ctx.fillStyle = color;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(text, viewW / 2, yPos + boxH / 2, boxW - 16);
+      ctx.fillText(text, viewW / 2, yPos + boxH / 2, boxW - 14);
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
     }
@@ -763,7 +764,7 @@
       drawHud();
 
       if (bannerMessage) {
-        drawCenteredBanner(bannerMessage, bannerColor, Math.min(26, Math.max(16, Math.floor(viewW / 22))));
+        drawCenteredBanner(bannerMessage, bannerColor, Math.min(24, Math.max(15, Math.floor(viewW / 22))));
       } else if (isPaused) {
         drawCenteredBanner("ПАУЗА", "#e0e0e0", 24);
       }
