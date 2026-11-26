@@ -52,10 +52,10 @@
     const pauseBtn = document.getElementById("pauseBtn");
 
     const FPS = 60;
-    const BASE_PLAYER_WIDTH = 120;
-    const MAX_PLAYER_WIDTH = 200;
-    const MIN_PLAYER_WIDTH = 65;
-    const MEGA_PLAYER_GROW = 16;
+    const BASE_PLAYER_WIDTH = 62;
+    const MAX_PLAYER_WIDTH = 110;
+    const MIN_PLAYER_WIDTH = 38;
+    const MEGA_PLAYER_GROW = 10;
     const TEN_SECONDS_TICKS = 625;
     const FIVE_SECONDS_TICKS = 313;
     const SEVEN_SECONDS_TICKS = 438;
@@ -68,7 +68,7 @@
       x: Math.max(0, (viewW - BASE_PLAYER_WIDTH) / 2),
       y: viewH - 95,
       width: BASE_PLAYER_WIDTH,
-      height: 28,
+      height: 16,
       color: "#00bfff"
     };
 
@@ -521,7 +521,7 @@
           starSpeed++;
           bombSpeed++;
           if (player.width > MIN_PLAYER_WIDTH) {
-            player.width = Math.max(MIN_PLAYER_WIDTH, player.width - 6);
+            player.width = Math.max(MIN_PLAYER_WIDTH, player.width - 4);
           }
         }
         resetStar();
