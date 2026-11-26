@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Игра — Ловец на звезди</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #141826;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    #pauseBtn {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 10;
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: bold;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 8px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+  </style>
+</head>
+<body>
+  <button id="pauseBtn" type="button">Пауза</button>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const pauseBtn = document.getElementById("pauseBtn");
+
+    const FPS = 60;
+    const BASE_PLAYER_WIDTH = 200;
+    const MAX_PLAYER_WIDTH = 320;
+    const MEGA_PLAYER_GROW = 24;
+    const TEN_SECONDS_TICKS = 625;
+    const FIVE_SECONDS_TICKS = 313;
+    const SEVEN_SECONDS_TICKS = 438;
+    const MAX_LIVES = 5;
+
+    let viewW = window.innerWidth;
+    let viewH = window.innerHeight;
+
+    const player = {
+      x: Math.max(0, (viewW - BASE_PLAYER_WIDTH) / 2),
+      y: viewH - 95,
+      width: BASE_PLAYER_WIDTH,
+      height: 30,
+      color: "#00bfff"
+    };
+
+    const star = { x: 200, y: 0, width: 72, height: 72 };
+    const bomb = { x: 100, y: -150, width: 72, height: 72 };
+    const bonus = { x: 300, y: -450, width: 72, height: 72 };
+
+    const rareItem = {
+      x: 240,
+      y: -120,
+      width: 56,
+      height: 56,
+      active: false,
+      speed: 7,
+      points: 2,
+      cooldown: randInt(1063, 1500)
+    };
+
+    const freezeItem = {
+      x: 180,
+      y: -120,
+      width: 56,
+      height: 56,
+      active: false,
+      speed: 6,
+      points: 2,
+      cooldown: randInt(750, 1125)
+    };
+
+    const megaItem = {
+      x: 320,
+      y: -120,
+      width: 60,
+      height: 60,
+      active: false,
+      speed: 8,
+      points: 5,
+      cooldown: randInt(938, 1375)
+    };
+
+    let score = 0;
+    let highScore = Number(localStorage.getItem("catch_high_score") || 0);
+    let lives = 3;
+    let level = 1;
+    let starSpeed = 6;
+    let bombSpeed = 8;
+    const bonusSpeed = 5;
+
+    let bombBlockedTicks = 0;
+    let slowMotionTicks = 0;
+    let stanBannerCooldown = SEVEN_SECONDS_TICKS;
+
+    let moveLeft = false;
+    let moveRight = false;
+    let pointerActive = false;
+    let targetPlayerX = null;
+    let isPaused = false;
+    let gameOverLock = false;
+
+    let bannerMessage = "";
+    let bannerColor = "#ffd700";
+    let bannerTimer = 0;
+
+    let flashColor = "transparent";
+    let flashAlpha = 0;
+
+    const particles = [];
+    const customImages = {};
+
+    function randInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function loadCustomImages() {
+      const names = ["player", "star", "bomb", "bonus", "rare", "freeze", "mega", "bg"];
+      const exts = ["png", "jpg", "jpeg", "bmp", "gif"];
+
+      names.forEach((name) => {
+        customImages[name] = null;
+        let idx = 0;
+
+        function tryNext() {
+          if (idx >= exts.length) return;
+          const img = new Image();
+          img.onload = () => {
+            customImages[name] = img;
+          };
+          img.onerror = () => {
+            idx++;
+            tryNext();
+          };
+          img.src = `Assets/${name}.${exts[idx]}`;
+        }
+
+        tryNext();
+      });
+    }
+
+    function initParticles(count = 35) {
+      particles.length = 0;
+      for (let i = 0; i < count; i++) {
+        particles.push({
+          x: randInt(0, Math.max(100, viewW)),
+          y: randInt(0, Math.max(100, viewH)),
+          speed: randInt(10, 35) / 10,
+          size: randInt(2, 5),
+          alpha: randInt(45, 145) / 255
+        });
+      }
+    }
+
+    function updateParticles() {
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.y += p.speed;
+        if (p.y > viewH) {
+          p.y = -p.size;
+          p.x = randInt(0, Math.max(10, viewW));
+        }
+      }
+    }
+
+    function resizeCanvas() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      viewW = window.innerWidth;
+      viewH = window.innerHeight;
+
+      canvas.width = Math.max(1, Math.floor(viewW * dpr));
+      canvas.height = Math.max(1, Math.floor(viewH * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      player.y = Math.max(80, viewH - 95);
+      if (player.x < 0) player.x = 0;
+      if (player.x > viewW - player.width) {
+        player.x = Math.max(0, viewW - player.width);
+      }
+
+      clampEntityX(star);
+      clampEntityX(bomb);
+      clampEntityX(bonus);
+      clampEntityX(rareItem);
+      clampEntityX(freezeItem);
+      clampEntityX(megaItem);
+    }
+
+    function clampEntityX(ent) {
+      if (ent.x > viewW - ent.width) {
+        ent.x = Math.max(10, viewW - ent.width - 10);
+      }
+    }
+
+    function triggerFlash(color, alphaByte = 85) {
+      flashColor = color;
+      flashAlpha = Math.min(1, alphaByte / 255);
+    }
+
+    function growPlayerWidth(delta) {
+      const oldWidth = player.width;
+      const newWidth = Math.min(MAX_PLAYER_WIDTH, player.width + delta);
+      const actualGrowth = newWidth - oldWidth;
+
+      if (actualGrowth > 0) {
+        player.width = newWidth;
+        player.x -= actualGrowth / 2;
+        if (player.x < 0) player.x = 0;
+        if (player.x > viewW - player.width) {
+          player.x = Math.max(0, viewW - player.width);
+        }
+      }
+    }
+
+    function intersects(a, b) {
+      return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+      );
+    }
+
+    function addPoints(points) {
+      score += points;
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem("catch_high_score", String(highScore));
+      }
+
+      const newLevel = Math.floor(score / 10) + 1;
+      if (newLevel > level) {
+        level = newLevel;
+        if (bombBlockedTicks <= 0) {
+          bannerMessage = `НИВО ${level}!`;
+          bannerColor = "#ffd700";
+          bannerTimer = 70;
+        }
+        triggerFlash("#ffd700", 65);
+      }
+    }
+
+    function resetStar() {
+      star.y = 0;
+      const maxX = Math.max(20, viewW - star.width - 10);
+      star.x = randInt(10, maxX);
+    }
+
+    function resetBomb() {
+      bomb.y = -randInt(60, 220);
+      const maxX = Math.max(20, viewW - bomb.width - 10);
+      bomb.x = randInt(10, maxX);
+    }
+
+    function resetBonus() {
+      bonus.y = -randInt(450, 900);
+      const maxX = Math.max(20, viewW - bonus.width - 10);
+      bonus.x = randInt(10, maxX);
+    }
+
+    function spawnRareItem() {
+      rareItem.active = true;
+      rareItem.y = -rareItem.height;
+      const maxX = Math.max(20, viewW - rareItem.width - 10);
+      rareItem.x = randInt(10, maxX);
+      rareItem.speed = Math.min(13, 6 + Math.floor(score / 5));
+    }
+
+    function resetRareItem() {
+      rareItem.active = false;
+      rareItem.y = -rareItem.height;
+      rareItem.cooldown = randInt(1063, 1500);
+    }
+
+    function updateRareItem() {
+      if (!rareItem.active) {
+        if (rareItem.cooldown > 0) rareItem.cooldown--;
+        else {
+          spawnRareItem();
+          rareItem.cooldown = randInt(1063, 1500);
+        }
+        return;
+      }
+
+      rareItem.y += rareItem.speed;
+
+      if (intersects(player, rareItem)) {
+        addPoints(rareItem.points);
+        bombBlockedTicks = TEN_SECONDS_TICKS;
+        bomb.y = -randInt(120, 260);
+        bannerMessage = "ПРЕМАХВАМ ДЖУКЕВА ЗА 10СЕКУНДИ";
+        bannerColor = "#ffd700";
+        bannerTimer = TEN_SECONDS_TICKS;
+        triggerFlash("#00ffff", 75);
+        resetRareItem();
+      } else if (rareItem.y > viewH) {
+        resetRareItem();
+      }
+    }
+
+    function spawnFreezeItem() {
+      freezeItem.active = true;
+      freezeItem.y = -freezeItem.height;
+      const maxX = Math.max(20, viewW - freezeItem.width - 10);
+      freezeItem.x = randInt(10, maxX);
+    }
+
+    function resetFreezeItem() {
+      freezeItem.active = false;
+      freezeItem.y = -freezeItem.height;
+      freezeItem.cooldown = randInt(750, 1125);
+    }
+
+    function updateFreezeItem() {
+      if (!freezeItem.active) {
+        if (freezeItem.cooldown > 0) freezeItem.cooldown--;
+        else {
+          spawnFreezeItem();
+          freezeItem.cooldown = randInt(750, 1125);
+        }
+        return;
+      }
+
+      freezeItem.y += freezeItem.speed;
+
+      if (intersects(player, freezeItem)) {
+        addPoints(freezeItem.points);
+        slowMotionTicks = FIVE_SECONDS_TICKS;
+        bannerMessage = "ЗАБАВЯНЕ ЗА 5 СЕКУНДИ! +2";
+        bannerColor = "#00ffff";
+        bannerTimer = 80;
+        triggerFlash("#6495ed", 70);
+        resetFreezeItem();
+      } else if (freezeItem.y > viewH) {
+        resetFreezeItem();
+      }
+    }
+
+    function spawnMegaItem() {
+      megaItem.active = true;
+      megaItem.y = -megaItem.height;
+      const maxX = Math.max(20, viewW - megaItem.width - 10);
+      megaItem.x = randInt(10, maxX);
+    }
+
+    function resetMegaItem() {
+      megaItem.active = false;
+      megaItem.y = -megaItem.height;
+      megaItem.cooldown = randInt(938, 1375);
+    }
+
+    function updateMegaItem() {
+      if (!megaItem.active) {
+        if (megaItem.cooldown > 0) megaItem.cooldown--;
+        else {
+          spawnMegaItem();
+          megaItem.cooldown = randInt(938, 1375);
+        }
+        return;
+      }
+
+      megaItem.y += megaItem.speed;
+
+      if (intersects(player, megaItem)) {
+        addPoints(megaItem.points);
+        growPlayerWidth(MEGA_PLAYER_GROW);
+        bannerMessage = "МЕГА БОНУС! +5 ТОЧКИ И ПО-ДЪЛЪГ ПЛЕЪР";
+        bannerColor = "#ffd700";
+        bannerTimer = 80;
+        triggerFlash("#ffd700", 80);
+        resetMegaItem();
+      } else if (megaItem.y > viewH) {
+        resetMegaItem();
+      }
+    }
+
+    function resetFullGame() {
+      score = 0;
+      lives = 3;
+      level = 1;
+      starSpeed = 6;
+      bombSpeed = 8;
+      bombBlockedTicks = 0;
+      slowMotionTicks = 0;
+      stanBannerCooldown = SEVEN_SECONDS_TICKS;
+      isPaused = false;
+      pauseBtn.textContent = "Пауза";
+      bannerMessage = "";
+      bannerColor = "#ffd700";
+      bannerTimer = 0;
+      flashAlpha = 0;
+      player.width = BASE_PLAYER_WIDTH;
+      player.x = Math.max(0, (viewW - player.width) / 2);
+      player.color = "#00bfff";
+
+      resetStar();
+      resetBomb();
+      resetBonus();
+      resetRareItem();
+      resetFreezeItem();
+      resetMegaItem();
+      gameOverLock = false;
+    }
+
+    function loseLife() {
+      if (gameOverLock) return;
+      lives--;
+      triggerFlash("#dc143c", 90);
+
+      if (lives <= 0) {
+        gameOverLock = true;
+        setTimeout(() => {
+          alert(`Край на играта!\nНиво: ${level}\nТочки: ${score}\nРекорд: ${highScore}`);
+          resetFullGame();
+        }, 30);
+      }
+    }
+
+    function updateGame() {
+      if (isPaused || gameOverLock) return;
+
+      updateParticles();
+
+      if (slowMotionTicks > 0) slowMotionTicks--;
+
+      if (bombBlockedTicks > 0) {
+        bombBlockedTicks--;
+        if (bombBlockedTicks === 0) {
+          resetBomb();
+        }
+      }
+
+      if (flashAlpha > 0) {
+        flashAlpha = Math.max(0, flashAlpha - 6 / 255);
+      }
+
+      if (stanBannerCooldown > 0) {
+        stanBannerCooldown--;
+      } else {
+        stanBannerCooldown = SEVEN_SECONDS_TICKS;
+        if (!bannerMessage) {
+          bannerMessage = "ВДИГАЙ СТАН";
+          bannerColor = "#ff2a2a";
+          bannerTimer = 125;
+        }
+      }
+
+      if (bannerTimer > 0) {
+        bannerTimer--;
+        if (bannerTimer === 0) {
+          bannerMessage = "";
+          bannerColor = "#ffd700";
+        }
+      }
+
+      const moveSpeed = Math.max(10, Math.floor(viewW / 90));
+      if (moveLeft && player.x > 0) player.x -= moveSpeed;
+      if (moveRight && player.x < viewW - player.width) player.x += moveSpeed;
+
+      if (pointerActive && targetPlayerX !== null) {
+        const desiredX = targetPlayerX - player.width / 2;
+        const diff = desiredX - player.x;
+        const maxStep = Math.max(18, moveSpeed * 2.2);
+        if (Math.abs(diff) <= maxStep) {
+          player.x = desiredX;
+        } else {
+          player.x += Math.sign(diff) * maxStep;
+        }
+        if (player.x < 0) player.x = 0;
+        if (player.x > viewW - player.width) {
+          player.x = Math.max(0, viewW - player.width);
+        }
+      }
+
+      const activeStarSpeed = slowMotionTicks > 0 ? Math.max(2, Math.floor(starSpeed / 2)) : starSpeed;
+      const activeBombSpeed = slowMotionTicks > 0 ? Math.max(3, Math.floor(bombSpeed / 2)) : bombSpeed;
+
+      star.y += activeStarSpeed;
+      if (bombBlockedTicks <= 0) {
+        bomb.y += activeBombSpeed;
+      }
+      bonus.y += bonusSpeed;
+
+      updateRareItem();
+      updateFreezeItem();
+      updateMegaItem();
+
+      if (intersects(player, star)) {
+        addPoints(1);
+        player.color = `rgb(${randInt(80, 255)}, ${randInt(80, 255)}, ${randInt(80, 255)})`;
+
+        if (score % 5 === 0) {
+          starSpeed++;
+          bombSpeed++;
+          if (player.width > 90) {
+            player.width -= 8;
+          }
+        }
+        resetStar();
+      }
+
+      if (intersects(player, bonus)) {
+        addPoints(3);
+        if (lives < MAX_LIVES) lives++;
+        bannerMessage = "БОНУС! +3 ТОЧКИ";
+        bannerColor = "#ffd700";
+        bannerTimer = 55;
+        triggerFlash("#32cd32", 70);
+        resetBonus();
+      }
+
+      if (star.y > viewH) {
+        loseLife();
+        resetStar();
+      }
+
+      if (bombBlockedTicks <= 0) {
+        if (intersects(player, bomb)) {
+          loseLife();
+          resetBomb();
+        } else if (bomb.y > viewH) {
+          resetBomb();
+        }
+      }
+
+      if (bonus.y > viewH) {
+        resetBonus();
+      }
+    }
+
+    function drawFallbackIcon(rect, kind) {
+      const cx = rect.x + rect.width / 2;
+      const cy = rect.y + rect.height / 2;
+      const r = Math.min(rect.width, rect.height) / 2;
+
+      if (kind === "star") {
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const angle = -Math.PI / 2 + (i * Math.PI) / 5;
+          const rad = i % 2 === 0 ? r : r * 0.45;
+          const px = cx + Math.cos(angle) * rad;
+          const py = cy + Math.sin(angle) * rad;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "gold";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "orangered";
+        ctx.stroke();
+      } else if (kind === "bomb") {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "crimson";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "darkred";
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(cx, rect.y + 4);
+        ctx.lineTo(cx + 6, rect.y - 5);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "yellow";
+        ctx.stroke();
+      } else if (kind === "bonus") {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "limegreen";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "darkgreen";
+        ctx.stroke();
+        drawCenterLabel(cx, cy, "+3", "black", 14);
+      } else if (kind === "rare") {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "aqua";
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "dodgerblue";
+        ctx.stroke();
+        drawCenterLabel(cx, cy, "10s", "navy", 13);
+      } else if (kind === "freeze") {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "cornflowerblue";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "white";
+        ctx.stroke();
+        drawCenterLabel(cx, cy, "SLOW", "white", 12);
+      } else if (kind === "mega") {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = "orange";
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "gold";
+        ctx.stroke();
+        drawCenterLabel(cx, cy, "+5", "black", 13);
+      }
+    }
+
+    function drawCenterLabel(cx, cy, text, color, sizePx) {
+      ctx.font = `bold ${sizePx}px "Segoe UI", sans-serif`;
+      ctx.fillStyle = color;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, cx, cy);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    }
+
+    function drawSprite(img, rect, kind) {
+      if (img) {
+        ctx.drawImage(img, rect.x, rect.y, rect.width, rect.height);
+      } else {
+        drawFallbackIcon(rect, kind);
+      }
+    }
+
+    function drawBackground() {
+      if (customImages.bg) {
+        ctx.drawImage(customImages.bg, 0, 0, viewW, viewH);
+        ctx.fillStyle = "rgba(12, 14, 24, 0.28)";
+        ctx.fillRect(0, 0, viewW, viewH);
+      } else {
+        const grad = ctx.createLinearGradient(0, 0, 0, viewH);
+        grad.addColorStop(0, "rgb(18, 24, 46)");
+        grad.addColorStop(1, "rgb(45, 22, 62)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, viewW, viewH);
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.09)";
+        ctx.lineWidth = 1;
+        for (let x = 0; x < viewW; x += 60) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, viewH);
+          ctx.stroke();
+        }
+        for (let y = 0; y < viewH; y += 60) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(viewW, y);
+          ctx.stroke();
+        }
+      }
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`;
+        ctx.fill();
+      }
+    }
+
+    function drawHud() {
+      let hudText = `Ниво: ${level} | Точки: ${score} | Рекорд: ${highScore} | Животи: ${lives}`;
+      if (bombBlockedTicks > 0) {
+        const secLeft = Math.max(1, Math.ceil(bombBlockedTicks * 0.016));
+        hudText += ` | Блок: ${secLeft}s`;
+      }
+      if (slowMotionTicks > 0) {
+        const slowLeft = Math.max(1, Math.ceil(slowMotionTicks * 0.016));
+        hudText += ` | Бавно: ${slowLeft}s`;
+      }
+
+      ctx.font = 'bold 15px "Segoe UI", sans-serif';
+      const w = Math.min(viewW - 110, ctx.measureText(hudText).width + 24);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillRect(12, 12, Math.max(120, w), 32);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(hudText, 20, 33, Math.max(100, w - 16));
+    }
+
+    function drawCenteredBanner(text, color, fontSize) {
+      ctx.font = `bold ${fontSize}px "Segoe UI", sans-serif`;
+      const metrics = ctx.measureText(text);
+      const boxW = Math.min(viewW - 24, metrics.width + 32);
+      const boxH = fontSize + 18;
+      const xPos = (viewW - boxW) / 2;
+      const yPos = viewH / 2 - 40;
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillRect(xPos, yPos, boxW, boxH);
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(xPos, yPos, boxW, boxH);
+
+      ctx.fillStyle = color;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, viewW / 2, yPos + boxH / 2, boxW - 16);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+    }
+
+    function renderGame() {
+      drawBackground();
+
+      if (customImages.player) {
+        ctx.drawImage(customImages.player, player.x, player.y, player.width, player.height);
+      } else {
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(player.x, player.y, player.width, player.height);
+      }
+
+      drawSprite(customImages.star, star, "star");
+
+      if (bombBlockedTicks <= 0) {
+        drawSprite(customImages.bomb, bomb, "bomb");
+      }
+
+      drawSprite(customImages.bonus, bonus, "bonus");
+
+      if (rareItem.active) drawSprite(customImages.rare, rareItem, "rare");
+      if (freezeItem.active) drawSprite(customImages.freeze, freezeItem, "freeze");
+      if (megaItem.active) drawSprite(customImages.mega, megaItem, "mega");
+
+      if (flashAlpha > 0) {
+        ctx.fillStyle = flashColor;
+        ctx.globalAlpha = flashAlpha;
+        ctx.fillRect(0, 0, viewW, viewH);
+        ctx.globalAlpha = 1;
+      }
+
+      drawHud();
+
+      if (bannerMessage) {
+        drawCenteredBanner(bannerMessage, bannerColor, Math.min(26, Math.max(16, Math.floor(viewW / 22))));
+      } else if (isPaused) {
+        drawCenteredBanner("ПАУЗА", "#e0e0e0", 24);
+      }
+    }
+
+    function togglePause() {
+      isPaused = !isPaused;
+      pauseBtn.textContent = isPaused ? "Продължи" : "Пауза";
+    }
+
+    pauseBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePause();
+    });
+
+    window.addEventListener("resize", resizeCanvas);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") moveLeft = true;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") moveRight = true;
+      if (e.key === "p" || e.key === "P") togglePause();
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") moveLeft = false;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") moveRight = false;
+    });
+
+    canvas.addEventListener("pointerdown", (e) => {
+      pointerActive = true;
+      targetPlayerX = e.clientX;
+    });
+
+    canvas.addEventListener("pointermove", (e) => {
+      if (pointerActive) {
+        targetPlayerX = e.clientX;
+      }
+    });
+
+    window.addEventListener("pointerup", () => {
+      pointerActive = false;
+      targetPlayerX = null;
+    });
+
+    loadCustomImages();
+    initParticles(35);
+    resizeCanvas();
+    resetStar();
+
+    setInterval(() => {
+      updateGame();
+      renderGame();
+    }, 1000 / FPS);
+  </script>
+</body>
+</html>
